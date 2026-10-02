@@ -1,0 +1,11 @@
+domains:
+  - example.com
+  - cloudflare.com
+  - isc.org
+  - unbound.net
+  - does-not-exist.example.net
+  - fail03.dnssec.works
+
+
+# How often to re-query all domains (seconds)
+interval: 30

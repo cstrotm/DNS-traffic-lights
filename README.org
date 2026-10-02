@@ -1,0 +1,139 @@
+#+title: DNS Traffic Light Monitor
+#+date: 2026-09-28
+
+A terminal-based DNS monitoring tool that renders a colour-coded traffic light
+next to each domain name using [[https://en.wikipedia.org/wiki/Sixel][Sixel]] graphics drawn with [[https://python-pillow.org/][Pillow]].
+Below each status code it lists the zone's name servers with their IPv4 and
+IPv6 addresses and the SOA serial each one reports.
+
+* What is shown
+
+For each zone the monitor
+
+1. queries the *NS records* of the zone (this sets the light and the status code),
+2. looks up the *A and AAAA records* of every name server, and
+3. asks *each name server directly* for the zone's *SOA record*.
+
+Under the status code there is one line per name server: name, IPv4
+addresses, IPv6 addresses, SOA serial and, right of the serial, the round-trip
+time of the SOA query in milliseconds.  If a name server cannot be queried,
+the serial column shows the reason in red instead (=TIMEOUT=, =REFUSED=,
+=NO SOA=, =NO ADDRESS=, …).
+
+* Status mapping
+
+| Light  | DNS RCODE  | Meaning                                  |
+|--------+------------+------------------------------------------|
+| Green  | =NOERROR=  | NS query succeeded (name servers listed below), or domain exists with no NS at that name |
+| Yellow | =NXDOMAIN= | Domain does not exist                    |
+| Red    | anything else | =SERVFAIL=, =TIMEOUT=, unreachable, … |
+
+The light reflects the NS lookup only.  A failing name server or differing
+serials do not change it; check the name server lines for that.  If the SOA serials of a
+zone's name servers differ, all of its serials are shown in red.
+
+* Requirements
+
+** Terminal
+Sixel output requires a Sixel-capable terminal emulator, for example:
+
+- [[https://invisible-island.net/xterm/][xterm]] launched with ~xterm -ti vt340~
+- [[http://mlterm.sourceforge.net/][mlterm]]
+- [[https://codeberg.org/dnkl/foot][foot]]
+- [[https://wezfurlong.org/wezterm/][WezTerm]]
+- [[https://iterm2.com/][iTerm2]] (macOS)
+
+Standard GNOME Terminal and most default ~xterm~ builds do *not* support Sixel.
+
+** Python
+Python 3.10 or later (uses ~X | None~ union type hints).
+
+** Python packages
+
+#+begin_src shell
+pip install -r requirements.txt
+#+end_src
+
+| Package      | Version  | Purpose                    |
+|--------------+----------+----------------------------|
+| =dnspython=  | ≥ 2.4.0  | DNS queries                |
+| =Pillow=     | ≥ 10.0.0 | Image rendering            |
+| =PyYAML=     | ≥ 6.0.0  | Configuration file parsing |
+
+* Installation
+
+#+begin_src shell
+git clone <repo>
+cd domain-traffic-light
+pip install -r requirements.txt
+#+end_src
+
+* Configuration
+
+Edit =config.yaml= before running:
+
+#+begin_src yaml
+domains:
+  - github.com
+  - cloudflare.com
+  - example.com
+  - nonexistent-domain-xyz-test.invalid
+  - fail03.dnssec.works
+
+# Seconds between re-queries (default: 30)
+interval: 30
+#+end_src
+
+List zone names (apex domains): name servers are only found for zones.
+An alternative config file can be passed as the first argument.
+
+* Usage
+
+#+begin_src shell
+python monitor.py            # uses config.yaml in the current directory
+python monitor.py other.yaml # explicit config path
+#+end_src
+
+| Key       | Action                  |
+|-----------+-------------------------|
+| ~q~ / ~Q~ | Quit                    |
+| ~Esc~     | Quit                    |
+| ~Ctrl-C~  | Quit                    |
+
+A countdown line below the display shows the seconds remaining until the next
+refresh cycle.
+
+* How it works
+
+1. *DNS queries* — all domains are queried concurrently via
+   ~concurrent.futures.ThreadPoolExecutor~.  For each zone the NS records are
+   fetched through the system resolver (5 s lifetime); this gives the status
+   code.  The name servers' A/AAAA records are then resolved and each name
+   server is sent a direct SOA query with recursion off (IPv4 addresses first,
+   then IPv6, TCP fallback on truncation).  The first answer gives the serial.
+
+2. *Image rendering* — Pillow draws a dark-background image containing a header
+   (title + timestamp) and one block per domain.  Each block has a horizontal
+   three-lamp traffic light widget (red · yellow · green) with the domain name
+   and status code to its right, followed by a table with one line per name
+   server (name, IPv4, IPv6, SOA serial, round-trip time).  Block height grows with the number
+   of name servers.
+
+3. *Sixel encoding* — the image is quantised to 128 colours and encoded as a
+   Sixel stream.  Encoding works band by band (6 pixel rows per band); within
+   each band every colour that appears is written as a separate pass, with
+   run-length compression (~!n<c>~) applied to each row of characters.
+
+4. *Display loop* — the screen is cleared (~ESC[2J~), the Sixel stream is
+   written, and the countdown is updated in-place once per second.  The
+   terminal is put into raw mode so ~q~/~Esc~ are detected without pressing
+   Enter.
+
+* File overview
+
+| File            | Purpose                              |
+|-----------------+--------------------------------------|
+| =monitor.py=    | Main script                          |
+| =README.md=     | User documentation (Markdown)        |
+| =config.yaml=   | Domain list and poll interval        |
+| =requirements.txt= | Python dependency pins            |
