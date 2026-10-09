@@ -6,6 +6,8 @@ next to each domain name using [[https://en.wikipedia.org/wiki/Sixel][Sixel]] gr
 Below each status code it lists the zone's name servers with their IPv4 and
 IPv6 addresses and the SOA serial each one reports.
 
+[[./dns-traffic-lights.jpg]]
+
 * What is shown
 
 For each zone the monitor
